@@ -14,7 +14,7 @@ def stock_list(request):
     }
     return render(request, 'stocks.html', context)
 
-
+@login_required
 def stock_detail(request, pk):
     stock = get_object_or_404(Stock, pk=pk)
     context = {
@@ -23,7 +23,7 @@ def stock_detail(request, pk):
     }
     return render(request, 'stock.html', context)
 
-
+@login_required
 def stock_buy(request, pk):
     if request.method != "POST":
         return redirect('stock:detail', pk=pk)
@@ -66,12 +66,57 @@ def stock_buy(request, pk):
 
 
 @login_required
-def stock_detail(request, pk):
-    pass
+def stock_sell(request, pk):
+    if request.method != "POST":
+        return redirect('stock:detail', pk=pk)
 
-@login_required
-def stock_buy(request, pk):
-    pass
+    stock = get_object_or_404(Stock, pk=pk)
+    form = BuySellForm(request.POST)
+
+    if form.is_valid():
+        amount = form.cleaned_data['amount']
+        price = form.cleaned_data['price']
+        sell_sum = price * amount  # сколько денег получим за продажу
+
+        # Находим запись по акциям пользователя
+        try:
+            acc_stock = AccountStock.objects.get(
+                account=request.user.account,
+                stock=stock
+            )
+        except AccountStock.DoesNotExist:
+            form.add_error(None, 'У вас нет таких акций для продажи')
+        else:
+            # Проверяем, хватает ли акций
+            if acc_stock.amount < amount:
+                form.add_error(None, 'Недостаточно акций для продажи')
+            else:
+                acc_stock.amount = acc_stock.amount - amount
+                # среднюю цену можно оставить как есть, она относится к оставшимся акциям
+                if acc_stock.amount == 0:
+                    # обнулить среднюю, чтобы не путаться
+                    acc_stock.average_buy_cost = 0
+
+                acc_currency, created = AccountCurrency.objects.get_or_create(
+                    account=request.user.account,
+                    currency=stock.currency,
+                    defaults={'amount': 0}
+                )
+
+                # Зачисляем деньги за продажу
+                acc_currency.amount = acc_currency.amount + sell_sum
+
+                acc_stock.save()
+                acc_currency.save()
+                return redirect('stock:list')
+
+    context = {
+        'stock': stock,
+        'form': form,
+    }
+    return render(request, 'stock.html', context)
+
+
 
 @login_required
 def account(request):
